@@ -72,8 +72,10 @@ class GameplayScreen(BaseScreen):
         self._notify_msg     : str  = ""
         self._notify_t       : float = 0.0
         # Clickable button rects (set each frame in draw)
-        self._hw_btn  : pygame.Rect = pygame.Rect(0, 0, 1, 1)
-        self._lyr_btn : pygame.Rect = pygame.Rect(0, 0, 1, 1)
+        self._hw_btn    : pygame.Rect = pygame.Rect(0, 0, 1, 1)
+        self._lyr_btn   : pygame.Rect = pygame.Rect(0, 0, 1, 1)
+        self._pause_btn : pygame.Rect = pygame.Rect(0, 0, 1, 1)
+        self._stop_btn  : pygame.Rect = pygame.Rect(0, 0, 1, 1)
 
         # Lyrics transition state
         self._ly_line_idx   = -1      # index of currently displayed line
@@ -144,8 +146,14 @@ class GameplayScreen(BaseScreen):
         if event.type == _MUSIC_END and self._state == "playing":
             self._finish()
             return
-        # Display-option buttons (mouse)
+        # Display-option buttons and control buttons (mouse)
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self._pause_btn.collidepoint(event.pos):
+                self._toggle_pause()
+                return
+            if self._stop_btn.collidepoint(event.pos):
+                self._finish()
+                return
             if self._hw_btn.collidepoint(event.pos):
                 self._cycle_highway_alpha()
                 return
@@ -742,17 +750,40 @@ class GameplayScreen(BaseScreen):
         # else IDLE — nothing to show
 
     def _draw_display_btns(self, surf):
-        """Clickable pill buttons for highway opacity and lyrics toggle — bottom-right corner."""
-        BTN_W, BTN_H = 126, 30
-        GAP          = 6
-        # Two buttons stacked above the hint bar
+        """Clickable buttons: PAUSE, STOP (bottom-left) + HWY/LYRICS (bottom-right)."""
+        BTN_H = 30
+        GAP   = 6
+
+        # ── Pause / Stop — bottom-left ────────────────────────────────────────
+        ctrl_w = 90
+        cx = 14
+        cy = T.SCREEN_H - 60
+
+        paused = self._paused
+        pause_r = pygame.Rect(cx, cy, ctrl_w, BTN_H)
+        self._pause_btn = pause_r
+        pause_col = T.GOLD if paused else T.INFO
+        pygame.draw.rect(surf, T.BG_CARD, pause_r, border_radius=8)
+        pygame.draw.rect(surf, pause_col, pause_r, 1, border_radius=8)
+        C.text(surf, "▶ RESUME" if paused else "⏸ PAUSE", "cond_bold", 12,
+               pause_col, pause_r.centerx, pause_r.centery,
+               anchor="center", uppercase=True)
+
+        stop_r = pygame.Rect(cx, cy + BTN_H + GAP, ctrl_w, BTN_H)
+        self._stop_btn = stop_r
+        pygame.draw.rect(surf, T.BG_CARD, stop_r, border_radius=8)
+        pygame.draw.rect(surf, T.RED, stop_r, 1, border_radius=8)
+        C.text(surf, "⏹ STOP", "cond_bold", 12, T.RED,
+               stop_r.centerx, stop_r.centery, anchor="center", uppercase=True)
+
+        # ── Highway opacity — bottom-right ────────────────────────────────────
+        BTN_W = 126
         bx = T.SCREEN_W - BTN_W - 14
         by = T.SCREEN_H - 60
 
-        # ── Highway opacity button ────────────────────────────────────────────
         pct   = int(self._highway_alpha / 255 * 100)
         label = f"HWY: {pct}%"
-        active = self._highway_alpha < 255          # highlight when not default
+        active = self._highway_alpha < 255
         hw_r  = pygame.Rect(bx, by, BTN_W, BTN_H)
         self._hw_btn = hw_r
         pygame.draw.rect(surf, T.BG_CARD, hw_r, border_radius=8)
@@ -762,7 +793,7 @@ class GameplayScreen(BaseScreen):
                T.GOLD if active else T.TEXT_2,
                hw_r.centerx, hw_r.centery, anchor="center", uppercase=True)
 
-        # ── Lyrics toggle button ──────────────────────────────────────────────
+        # ── Lyrics toggle — bottom-right, below HWY ───────────────────────────
         lyr_on = self._lyrics_visible
         lyr_r  = pygame.Rect(bx, by + BTN_H + GAP, BTN_W, BTN_H)
         self._lyr_btn = lyr_r

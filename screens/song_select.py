@@ -30,11 +30,15 @@ class _Card:
                     pass
         return self._cover
 
-    def fetch_cover_async(self, force: bool = False):
-        """Trigger a background iTunes cover download (force=True re-downloads even if present)."""
+    def fetch_cover_async(self, force: bool = False, query: str = None):
+        """Trigger a background iTunes cover download.
+
+        force=True  — re-download even if a cover already exists.
+        query       — custom iTunes search string; if None uses "artist title".
+        """
         if self._cover_fetching:
             return
-        if not force and self.song.cover_path:
+        if not force and self.song.cover_path and query is None:
             return
         if not (self.song.artist or self.song.title):
             return
@@ -48,7 +52,7 @@ class _Card:
                 from engine.usdb_client import download_cover, _patch_cover_tag
                 import glob
                 cover_path = download_cover(song.artist, song.title, song.folder,
-                                            force=force)
+                                            force=True, query=query)
                 if cover_path:
                     song.cover = os.path.basename(cover_path)
                     txts = glob.glob(os.path.join(song.folder, "*.txt"))
@@ -88,6 +92,25 @@ class SongSelectScreen(BaseScreen):
         self._cover_dl:  dict[str, str] = {}
         self._lyrics_btn: pygame.Rect = pygame.Rect(0, 0, 1, 1)
         self._cover_btn:  pygame.Rect = pygame.Rect(0, 0, 1, 1)
+        self._rename_btn: pygame.Rect = pygame.Rect(0, 0, 1, 1)
+
+        # ── Cover search-query editing (shown inline when cover btn clicked) ──
+        self._cover_search        : bool  = False   # True = input bar visible
+        self._cover_search_q      : str   = ""      # editable query string
+        self._cover_confirm_btn   : pygame.Rect = pygame.Rect(0, 0, 1, 1)
+        self._cover_cancel_btn    : pygame.Rect = pygame.Rect(0, 0, 1, 1)
+
+        # ── Rename modal ─────────────────────────────────────────────────────
+        self._rename_mode    : bool = False
+        self._rename_title   : str  = ""
+        self._rename_artist  : str  = ""
+        self._rename_field   : int  = 0    # 0 = title field, 1 = artist field
+        # modal button rects — set in draw
+        self._rename_ok_btn  : pygame.Rect = pygame.Rect(0, 0, 1, 1)
+        self._rename_can_btn : pygame.Rect = pygame.Rect(0, 0, 1, 1)
+        self._rename_title_r : pygame.Rect = pygame.Rect(0, 0, 1, 1)
+        self._rename_artist_r: pygame.Rect = pygame.Rect(0, 0, 1, 1)
+
         self._reload()
 
     # ── Library ───────────────────────────────────────────────────────────────
@@ -129,6 +152,59 @@ class SongSelectScreen(BaseScreen):
     # ── Input ─────────────────────────────────────────────────────────────────
 
     def handle_event(self, event):
+        # ── Rename modal intercepts all input while open ──────────────────────
+        if self._rename_mode:
+            if event.type == pygame.KEYDOWN:
+                k = event.key
+                if k == pygame.K_ESCAPE:
+                    self._rename_mode = False
+                elif k == pygame.K_RETURN:
+                    self._commit_rename()
+                elif k == pygame.K_TAB:
+                    self._rename_field = 1 - self._rename_field
+                elif k == pygame.K_BACKSPACE:
+                    if self._rename_field == 0:
+                        self._rename_title = self._rename_title[:-1]
+                    else:
+                        self._rename_artist = self._rename_artist[:-1]
+                elif event.unicode and event.unicode.isprintable():
+                    if self._rename_field == 0:
+                        self._rename_title += event.unicode
+                    else:
+                        self._rename_artist += event.unicode
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if self._rename_ok_btn.collidepoint(event.pos):
+                    self._commit_rename()
+                elif self._rename_can_btn.collidepoint(event.pos):
+                    self._rename_mode = False
+                elif self._rename_title_r.collidepoint(event.pos):
+                    self._rename_field = 0
+                elif self._rename_artist_r.collidepoint(event.pos):
+                    self._rename_field = 1
+            return
+
+        # ── Cover search query input intercepts keypresses while open ─────────
+        if self._cover_search:
+            if event.type == pygame.KEYDOWN:
+                k = event.key
+                if k == pygame.K_ESCAPE:
+                    self._cover_search = False
+                elif k == pygame.K_RETURN:
+                    self._start_cover_fetch()
+                elif k == pygame.K_BACKSPACE:
+                    self._cover_search_q = self._cover_search_q[:-1]
+                elif event.unicode and event.unicode.isprintable():
+                    self._cover_search_q += event.unicode
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if self._cover_confirm_btn.collidepoint(event.pos):
+                    self._start_cover_fetch()
+                    return
+                if self._cover_cancel_btn.collidepoint(event.pos):
+                    self._cover_search = False
+                    return
+                # Fall through so clicks on other UI elements still work
+            # Don't return — allow scroll wheel etc. to pass through
+
         if event.type == pygame.KEYDOWN:
             k = event.key
             if self._search_active:
@@ -148,8 +224,10 @@ class SongSelectScreen(BaseScreen):
 
             if k in (pygame.K_UP, pygame.K_w):
                 self._sel = max(0, self._sel - 1)
+                self._cover_search = False
             elif k in (pygame.K_DOWN, pygame.K_s):
                 self._sel = min(len(self._cards) - 1, self._sel + 1)
+                self._cover_search = False
             elif k in (pygame.K_RETURN, pygame.K_SPACE):
                 self._play()
             elif k == pygame.K_ESCAPE:
@@ -207,6 +285,7 @@ class SongSelectScreen(BaseScreen):
                     self._play()
                 else:
                     self._sel = i
+                    self._cover_search = False
                 return
 
         if self._lyrics_btn.collidepoint(pos):
@@ -216,9 +295,22 @@ class SongSelectScreen(BaseScreen):
         if self._cover_btn.collidepoint(pos):
             if self._cards and self._sel < len(self._cards):
                 song = self._cards[self._sel].song
-                key  = song.folder or song.title
-                self._cover_dl[key] = "fetching"
-                self._cards[self._sel].fetch_cover_async(force=True)
+                if not self._cards[self._sel]._cover_fetching:
+                    # Toggle search bar — pre-fill with suggested query
+                    if not self._cover_search:
+                        self._cover_search   = True
+                        self._cover_search_q = f"{song.artist} {song.title}"
+                    else:
+                        self._cover_search = False
+            return
+
+        if self._rename_btn.collidepoint(pos):
+            if self._cards and self._sel < len(self._cards):
+                song = self._cards[self._sel].song
+                self._rename_title  = song.title
+                self._rename_artist = song.artist
+                self._rename_field  = 0
+                self._rename_mode   = True
             return
 
         if hasattr(self, "_play_btn") and self._play_btn.collidepoint(pos):
@@ -301,6 +393,59 @@ class SongSelectScreen(BaseScreen):
             print(f"[FetchLyrics] {e}")
             self._lyrics_dl[key] = "error"
 
+    def _start_cover_fetch(self):
+        """Confirm the cover search query and start background download."""
+        self._cover_search = False
+        if not self._cards or self._sel >= len(self._cards):
+            return
+        card = self._cards[self._sel]
+        song = card.song
+        key  = song.folder or song.title
+        q    = self._cover_search_q.strip() or f"{song.artist} {song.title}"
+        self._cover_dl[key] = "fetching"
+        card.fetch_cover_async(force=True, query=q)
+
+    def _commit_rename(self):
+        """Apply the rename to the song object and patch the .txt file."""
+        self._rename_mode = False
+        if not self._cards or self._sel >= len(self._cards):
+            return
+        new_title  = self._rename_title.strip()
+        new_artist = self._rename_artist.strip()
+        if not new_title:
+            return
+        song = self._cards[self._sel].song
+        old_title, old_artist = song.title, song.artist
+        if new_title == old_title and new_artist == old_artist:
+            return  # nothing changed
+
+        # Update in-memory song object
+        song.title  = new_title
+        song.artist = new_artist
+
+        # Patch #TITLE: / #ARTIST: in the .txt file
+        if song.folder:
+            for txt_path in glob.glob(os.path.join(song.folder, "*.txt")):
+                try:
+                    with open(txt_path, "r", encoding="utf-8", errors="replace") as f:
+                        lines = f.readlines()
+                    out = []
+                    for line in lines:
+                        ul = line.upper().lstrip()
+                        if ul.startswith("#TITLE:"):
+                            out.append(f"#TITLE:{new_title}\n")
+                        elif ul.startswith("#ARTIST:"):
+                            out.append(f"#ARTIST:{new_artist}\n")
+                        else:
+                            out.append(line)
+                    with open(txt_path, "w", encoding="utf-8") as f:
+                        f.writelines(out)
+                except Exception as e:
+                    print(f"[Rename] {e}")
+
+        # Re-sort the list to reflect the new title/artist
+        self._apply_filter()
+
     def _play(self):
         if self._cards:
             self.game.start_song(self._cards[self._sel].song)
@@ -346,6 +491,75 @@ class SongSelectScreen(BaseScreen):
         self._draw_header(surf)
         self._draw_list(surf)
         self._draw_detail(surf)
+        if self._rename_mode:
+            self._draw_rename_modal(surf)
+
+    def _draw_rename_modal(self, surf):
+        """Full-screen overlay with title & artist text fields."""
+        # Dim background
+        overlay = pygame.Surface((T.SCREEN_W, T.SCREEN_H), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 170))
+        surf.blit(overlay, (0, 0))
+
+        # Modal box
+        mw, mh = 560, 280
+        mx = (T.SCREEN_W - mw) // 2
+        my = (T.SCREEN_H - mh) // 2
+        modal = pygame.Surface((mw, mh), pygame.SRCALPHA)
+        modal.fill((*T.BG_PANEL, 245))
+        pygame.draw.rect(modal, T.GOLD_DIM, modal.get_rect(), 1, border_radius=12)
+        surf.blit(modal, (mx, my))
+
+        C.text(surf, "RENAME SONG", "display_bold", 20, T.GOLD,
+               mx + mw // 2, my + 18, anchor="midtop", uppercase=True)
+        C.h_divider(surf, mx + 20, mx + mw - 20, my + 48, alpha=80)
+
+        field_h = 40
+        field_w = mw - 60
+        fx = mx + 30
+
+        def draw_field(label, text, rect, active):
+            self_color = T.GOLD if active else T.HIGHWAY_GRID
+            C.text(surf, label, "cond_bold", 12, T.TEXT_3,
+                   fx, rect.y - 18, anchor="topleft", uppercase=True)
+            pygame.draw.rect(surf, T.BG_CARD, rect, border_radius=8)
+            pygame.draw.rect(surf, self_color, rect, 2 if active else 1, border_radius=8)
+            blink = "|" if active and int(self._cursor_t * 2) % 2 == 0 else ""
+            C.text(surf, text + blink, "body_semi", 17, T.TEXT_1,
+                   rect.x + 12, rect.centery, anchor="midleft")
+
+        title_r  = pygame.Rect(fx, my + 72, field_w, field_h)
+        artist_r = pygame.Rect(fx, my + 148, field_w, field_h)
+        self._rename_title_r  = title_r
+        self._rename_artist_r = artist_r
+
+        draw_field("Title",  self._rename_title,  title_r,  self._rename_field == 0)
+        draw_field("Artist", self._rename_artist, artist_r, self._rename_field == 1)
+
+        C.text(surf, "TAB — switch field   ·   ENTER — confirm   ·   ESC — cancel",
+               "body_reg", 12, T.TEXT_3,
+               mx + mw // 2, my + 202, anchor="midtop")
+
+        # Confirm + Cancel buttons
+        bw, bh = 130, 38
+        gap     = 16
+        total   = bw * 2 + gap
+        bx0     = mx + (mw - total) // 2
+        by      = my + mh - bh - 18
+
+        ok_r  = pygame.Rect(bx0,        by, bw, bh)
+        can_r = pygame.Rect(bx0 + bw + gap, by, bw, bh)
+        self._rename_ok_btn  = ok_r
+        self._rename_can_btn = can_r
+
+        C.pill(surf, ok_r, T.GOLD, alpha=220)
+        C.text(surf, "SAVE", "body_bold", 16, T.TEXT_INV,
+               ok_r.centerx, ok_r.centery, anchor="center")
+
+        pygame.draw.rect(surf, T.BG_CARD, can_r, border_radius=can_r.height // 2)
+        pygame.draw.rect(surf, T.HIGHWAY_GRID, can_r, 1, border_radius=can_r.height // 2)
+        C.text(surf, "CANCEL", "body_bold", 16, T.TEXT_2,
+               can_r.centerx, can_r.centery, anchor="center")
 
     def _draw_header(self, surf):
         C.text(surf, "MUSIC LIBRARY", "display_bold", 26, T.TEXT_1,
@@ -592,7 +806,47 @@ class SongSelectScreen(BaseScreen):
         C.text(surf, lbl_cov, "body_semi", 13, txt_cov,
                cov_btn.centerx, cov_btn.centery, anchor="center")
 
-        y += btn_h + 14
+        y += btn_h + 6
+
+        # ── Cover search input (shown when user clicked ⬇ Cover) ─────────────
+        if self._cover_search:
+            inp_h = 30
+            inp_r = pygame.Rect(dx, y, dw - 70, inp_h)
+            pygame.draw.rect(surf, T.BG_CARD, inp_r, border_radius=6)
+            pygame.draw.rect(surf, T.GOLD, inp_r, 1, border_radius=6)
+            q_display = self._cover_search_q or ""
+            blink = "|" if int(self._cursor_t * 2) % 2 == 0 else ""
+            C.text(surf, q_display + blink, "body_reg", 13, T.TEXT_1,
+                   inp_r.x + 8, inp_r.centery, anchor="midleft")
+
+            # GO button
+            go_r = pygame.Rect(inp_r.right + 4, y, 30, inp_h)
+            self._cover_confirm_btn = go_r
+            pygame.draw.rect(surf, T.GOLD, go_r, border_radius=6)
+            C.text(surf, "GO", "cond_bold", 11, T.TEXT_INV,
+                   go_r.centerx, go_r.centery, anchor="center")
+
+            # ✕ cancel
+            cx_r = pygame.Rect(go_r.right + 4, y, 28, inp_h)
+            self._cover_cancel_btn = cx_r
+            pygame.draw.rect(surf, T.BG_CARD, cx_r, border_radius=6)
+            pygame.draw.rect(surf, T.TEXT_3, cx_r, 1, border_radius=6)
+            C.text(surf, "✕", "body_reg", 13, T.TEXT_3,
+                   cx_r.centerx, cx_r.centery, anchor="center")
+
+            y += inp_h + 6
+        else:
+            y += 2
+
+        # ── RENAME button (full width, subtle) ───────────────────────────────
+        ren_h = 28
+        ren_r = pygame.Rect(dx, y, dw, ren_h)
+        self._rename_btn = ren_r
+        pygame.draw.rect(surf, T.BG_CARD, ren_r, border_radius=6)
+        pygame.draw.rect(surf, T.HIGHWAY_GRID, ren_r, 1, border_radius=6)
+        C.text(surf, "✏  RENAME SONG", "cond_bold", 12, T.TEXT_3,
+               ren_r.centerx, ren_r.centery, anchor="center", uppercase=True)
+        y += ren_h + 12
 
         # ── Song title / metadata ─────────────────────────────────────────────
         C.text_shadow(surf, song.title, "display_bold", 24, T.TEXT_1,

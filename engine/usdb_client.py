@@ -688,8 +688,12 @@ _ITUNES_URL    = "https://itunes.apple.com/search"
 
 
 def download_cover(artist: str, title: str, dest_folder: str,
-                   force: bool = False) -> Optional[str]:
-    """Download album art via iTunes Search API. Returns saved path or None."""
+                   force: bool = False, query: str = None) -> Optional[str]:
+    """Download album art via iTunes Search API. Returns saved path or None.
+
+    Pass *query* to override the default "artist title" search term —
+    useful when the user wants to fine-tune the iTunes query.
+    """
     if not _REQ:
         return None
     dest = os.path.join(dest_folder, COVER_FILENAME)
@@ -697,13 +701,15 @@ def download_cover(artist: str, title: str, dest_folder: str,
         return dest
     try:
         sess = _session()
+        primary_term = query if query else f"{artist} {title}"
         r = sess.get(_ITUNES_URL,
-                     params={"term": f"{artist} {title}", "entity": "song", "limit": 5},
+                     params={"term": primary_term, "entity": "song", "limit": 5},
                      timeout=10)
         results = r.json().get("results", [])
         if not results:
+            fallback = query if query else artist
             r = sess.get(_ITUNES_URL,
-                         params={"term": artist, "entity": "musicArtist", "limit": 3},
+                         params={"term": fallback, "entity": "musicArtist", "limit": 3},
                          timeout=10)
             results = r.json().get("results", [])
         if not results:
