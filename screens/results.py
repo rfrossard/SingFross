@@ -21,7 +21,7 @@ class ResultsScreen(BaseScreen):
             if event.key in (pygame.K_RETURN, pygame.K_SPACE):
                 self.game.push_screen("song_select")
             elif event.key == pygame.K_ESCAPE:
-                self.game.push_screen("menu")
+                self.game.go_home()
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.handle_home_click(event):
                 return

@@ -191,7 +191,7 @@ class GameplayScreen(BaseScreen):
         if event.type != pygame.KEYDOWN:
             return
         if event.key == pygame.K_ESCAPE:
-            self._finish()
+            self._toggle_pause()   # ESC pauses only — use STOP button to exit
         elif event.key == pygame.K_p:
             self._toggle_pause()
         elif event.key == pygame.K_LEFTBRACKET:
@@ -770,10 +770,9 @@ class GameplayScreen(BaseScreen):
         # else IDLE — nothing to show
 
     def _draw_display_btns(self, surf):
-        """Single-row control strip anchored safely inside the bottom of the screen."""
+        """Single-row control strip anchored to the bottom of the screen."""
         BTN_H = 32
-        # Strip sits at HIGHWAY_BOT + 14 so it's always inside the game area
-        by = T.HIGHWAY_BOT + 14
+        by    = T.SCREEN_H - BTN_H - 8   # always 8 px from the screen edge
 
         # Semi-transparent strip background
         strip = pygame.Surface((T.SCREEN_W, BTN_H + 8), pygame.SRCALPHA)
@@ -856,12 +855,10 @@ class GameplayScreen(BaseScreen):
                T.SCREEN_W // 2, ty + bh // 2, anchor="center", alpha=a)
 
     def _draw_hint(self, surf):
-        # Keyboard shortcut hints sit just below the bottom control strip
-        parts = ["ESC Quit"]
+        # Tiny keyboard hint shown only when stems are loaded (vocal controls)
         if self.audio.stems_loaded:
-            parts += ["[ / ] Vocal", "M Mute"]
-        C.text(surf, "  ·  ".join(parts), "body_reg", 11, T.TEXT_3,
-               T.SCREEN_W // 2, T.HIGHWAY_BOT + 52, anchor="midtop")
+            C.text(surf, "[ ] Vocal  ·  M Mute", "body_reg", 11, T.TEXT_3,
+                   200, T.SCREEN_H - 50, anchor="midleft")
 
     # ── Overlays ──────────────────────────────────────────────────────────
 

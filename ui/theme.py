@@ -43,10 +43,10 @@ FPS           = 60
 
 HUD_H         = 80
 HIGHWAY_TOP   = HUD_H + 10
-HIGHWAY_BOT   = 510
+HIGHWAY_BOT   = 618          # extends close to bottom, leaving room for controls
 HIGHWAY_LEFT  = 40
 HIGHWAY_RIGHT = 1240
-LYRICS_Y      = 528
+LYRICS_Y      = 628          # just below highway
 CURRENT_X     = 220   # time-marker x — aligned with the ×1 multiplier badge
 LOOK_AHEAD    = 6.0
 LOOK_BACK     = 1.5
