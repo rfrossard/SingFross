@@ -72,10 +72,11 @@ class GameplayScreen(BaseScreen):
         self._notify_msg     : str  = ""
         self._notify_t       : float = 0.0
         # Clickable button rects (set each frame in draw)
-        self._hw_btn    : pygame.Rect = pygame.Rect(0, 0, 1, 1)
-        self._lyr_btn   : pygame.Rect = pygame.Rect(0, 0, 1, 1)
-        self._pause_btn : pygame.Rect = pygame.Rect(0, 0, 1, 1)
-        self._stop_btn  : pygame.Rect = pygame.Rect(0, 0, 1, 1)
+        self._lyr_btn     : pygame.Rect = pygame.Rect(0, 0, 1, 1)
+        self._pause_btn   : pygame.Rect = pygame.Rect(0, 0, 1, 1)
+        self._stop_btn    : pygame.Rect = pygame.Rect(0, 0, 1, 1)
+        self._slider_track: pygame.Rect = pygame.Rect(0, 0, 1, 1)
+        self._slider_drag : bool        = False
 
         # Lyrics transition state
         self._ly_line_idx   = -1      # index of currently displayed line
@@ -142,20 +143,35 @@ class GameplayScreen(BaseScreen):
 
     # ── Input ─────────────────────────────────────────────────────────────
 
+    def _alpha_from_x(self, mx: int):
+        """Map a mouse x coordinate to a highway alpha value via the slider track."""
+        t = max(0.0, min(1.0, (mx - self._slider_track.x) / max(1, self._slider_track.width)))
+        self._highway_alpha = int(t * 255)
+
     def handle_event(self, event):
         if event.type == _MUSIC_END and self._state == "playing":
             self._finish()
             return
+
+        # Slider drag (MOUSEMOTION / MOUSEBUTTONUP)
+        if event.type == pygame.MOUSEMOTION:
+            if self._slider_drag and event.buttons[0]:
+                self._alpha_from_x(event.pos[0])
+            return
+        if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            self._slider_drag = False
+
         # Display-option buttons and control buttons (mouse)
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self._slider_track.collidepoint(event.pos):
+                self._slider_drag = True
+                self._alpha_from_x(event.pos[0])
+                return
             if self._pause_btn.collidepoint(event.pos):
                 self._toggle_pause()
                 return
             if self._stop_btn.collidepoint(event.pos):
                 self._finish()
-                return
-            if self._hw_btn.collidepoint(event.pos):
-                self._cycle_highway_alpha()
                 return
             if self._lyr_btn.collidepoint(event.pos):
                 self._toggle_lyrics_visible()
@@ -553,25 +569,29 @@ class GameplayScreen(BaseScreen):
                         spacing=36, r=12)
         else:
             st = self.scorers[0].state
-            C.text(surf,"SCORE","cond_bold",12,T.TEXT_3,20,10,uppercase=True)
-            C.text_shadow(surf,f"{st.total_score:,}","num_black",40,T.GOLD,
-                          20,24,shadow_color=(60,40,0),offset=(2,2))
-            C.multiplier_badge(surf,220,T.HUD_H//2,st.multiplier)
-            C.stars_row(surf,T.SCREEN_W//2,T.HUD_H//2+6,5,st.stars,
-                        spacing=42,r=14)
-            acc = int(st.accuracy*100)
-            col_a=(T.SUCCESS if acc>=80 else T.WARNING if acc>=50 else T.RED)
-            C.text(surf,"ACCURACY","cond_bold",12,T.TEXT_3,
-                   T.SCREEN_W-130,10,uppercase=True)
-            C.text_shadow(surf,f"{acc}%","num_black",36,col_a,
-                          T.SCREEN_W-20,28,anchor="topright",
-                          shadow_color=(0,0,0),offset=(1,2))
-            # Mic input level bar
-            vol=min(1.0,self.game.mic_manager.volume*20)
-            C.progress_bar(surf,pygame.Rect(T.SCREEN_W-130,62,110,10),
-                           vol,color=T.INFO,bg=T.HIGHWAY_GRID)
-            # Vocal volume control (right side, below accuracy)
-            self._draw_vocal_control(surf, T.SCREEN_W - 130, 44)
+            # Score — left
+            C.text(surf, "SCORE", "cond_bold", 11, T.TEXT_3, 20, 8, uppercase=True)
+            C.text_shadow(surf, f"{st.total_score:,}", "num_black", 38, T.GOLD,
+                          20, 20, shadow_color=(60, 40, 0), offset=(2, 2))
+            # Multiplier badge at CURRENT_X so it sits above the yellow time-marker
+            C.multiplier_badge(surf, T.CURRENT_X, T.HUD_H // 2, st.multiplier)
+            # Stars — center
+            C.stars_row(surf, T.SCREEN_W // 2, T.HUD_H // 2 + 6, 5, st.stars,
+                        spacing=42, r=14)
+            # Accuracy — right column (compact, no overlap)
+            acc   = int(st.accuracy * 100)
+            col_a = (T.SUCCESS if acc >= 80 else T.WARNING if acc >= 50 else T.RED)
+            rpad  = T.SCREEN_W - 14
+            C.text(surf, "ACCURACY", "cond_bold", 11, T.TEXT_3,
+                   rpad, 8, anchor="topright", uppercase=True)
+            C.text(surf, f"{acc}%", "num_bold", 26, col_a,
+                   rpad, 20, anchor="topright")
+            # Mic level bar — below accuracy
+            vol = min(1.0, self.game.mic_manager.volume * 20)
+            bar_r = pygame.Rect(T.SCREEN_W - 124, 50, 110, 8)
+            C.progress_bar(surf, bar_r, vol, color=T.INFO, bg=T.HIGHWAY_GRID)
+            # Vocal volume control — bottom of HUD, right side
+            self._draw_vocal_control(surf, T.SCREEN_W - 124, 62)
 
         # Feedback labels (combo count / line bonus "+N")
         for pi in range(len(self.scorers)):
@@ -750,57 +770,73 @@ class GameplayScreen(BaseScreen):
         # else IDLE — nothing to show
 
     def _draw_display_btns(self, surf):
-        """Clickable buttons: PAUSE, STOP (bottom-left) + HWY/LYRICS (bottom-right)."""
-        BTN_H = 30
-        GAP   = 6
+        """Single-row control strip anchored safely inside the bottom of the screen."""
+        BTN_H = 32
+        # Strip sits at HIGHWAY_BOT + 14 so it's always inside the game area
+        by = T.HIGHWAY_BOT + 14
 
-        # ── Pause / Stop — bottom-left ────────────────────────────────────────
-        ctrl_w = 90
-        cx = 14
-        cy = T.SCREEN_H - 60
+        # Semi-transparent strip background
+        strip = pygame.Surface((T.SCREEN_W, BTN_H + 8), pygame.SRCALPHA)
+        strip.fill((10, 10, 18, 180))
+        surf.blit(strip, (0, by - 4))
 
-        paused = self._paused
-        pause_r = pygame.Rect(cx, cy, ctrl_w, BTN_H)
+        # ── ⏸ PAUSE / ▶ RESUME ───────────────────────────────────────────────
+        pause_w = 96
+        pause_r = pygame.Rect(10, by, pause_w, BTN_H)
         self._pause_btn = pause_r
-        pause_col = T.GOLD if paused else T.INFO
-        pygame.draw.rect(surf, T.BG_CARD, pause_r, border_radius=8)
-        pygame.draw.rect(surf, pause_col, pause_r, 1, border_radius=8)
-        C.text(surf, "▶ RESUME" if paused else "⏸ PAUSE", "cond_bold", 12,
-               pause_col, pause_r.centerx, pause_r.centery,
-               anchor="center", uppercase=True)
+        paused    = self._paused
+        p_col     = T.GOLD if paused else T.INFO
+        pygame.draw.rect(surf, T.BG_CARD, pause_r, border_radius=7)
+        pygame.draw.rect(surf, p_col, pause_r, 1, border_radius=7)
+        C.text(surf, "▶ RESUME" if paused else "⏸ PAUSE", "cond_bold", 12, p_col,
+               pause_r.centerx, pause_r.centery, anchor="center", uppercase=True)
 
-        stop_r = pygame.Rect(cx, cy + BTN_H + GAP, ctrl_w, BTN_H)
+        # ── ⏹ STOP ────────────────────────────────────────────────────────────
+        stop_r = pygame.Rect(pause_r.right + 6, by, 80, BTN_H)
         self._stop_btn = stop_r
-        pygame.draw.rect(surf, T.BG_CARD, stop_r, border_radius=8)
-        pygame.draw.rect(surf, T.RED, stop_r, 1, border_radius=8)
+        pygame.draw.rect(surf, T.BG_CARD, stop_r, border_radius=7)
+        pygame.draw.rect(surf, T.RED, stop_r, 1, border_radius=7)
         C.text(surf, "⏹ STOP", "cond_bold", 12, T.RED,
                stop_r.centerx, stop_r.centery, anchor="center", uppercase=True)
 
-        # ── Highway opacity — bottom-right ────────────────────────────────────
-        BTN_W = 126
-        bx = T.SCREEN_W - BTN_W - 14
-        by = T.SCREEN_H - 60
+        # ── Highway transparency slider (center) ──────────────────────────────
+        sldr_x = stop_r.right + 20
+        sldr_w = 220
+        sldr_label_w = 38   # "HWY" label
+        track_x = sldr_x + sldr_label_w + 8
+        track_w = sldr_w - sldr_label_w - 8
+        track_y = by + BTN_H // 2
+        track_r = pygame.Rect(track_x, track_y - 4, track_w, 8)
+        self._slider_track = track_r
 
-        pct   = int(self._highway_alpha / 255 * 100)
-        label = f"HWY: {pct}%"
-        active = self._highway_alpha < 255
-        hw_r  = pygame.Rect(bx, by, BTN_W, BTN_H)
-        self._hw_btn = hw_r
-        pygame.draw.rect(surf, T.BG_CARD, hw_r, border_radius=8)
-        pygame.draw.rect(surf, T.GOLD if active else T.HIGHWAY_GRID,
-                         hw_r, 1, border_radius=8)
-        C.text(surf, label, "cond_bold", 13,
-               T.GOLD if active else T.TEXT_2,
-               hw_r.centerx, hw_r.centery, anchor="center", uppercase=True)
+        C.text(surf, "HWY", "cond_bold", 11, T.TEXT_3,
+               sldr_x, track_y, anchor="midleft", uppercase=True)
 
-        # ── Lyrics toggle — bottom-right, below HWY ───────────────────────────
+        # Track background
+        pygame.draw.rect(surf, T.HIGHWAY_GRID, track_r, border_radius=4)
+        # Filled portion (alpha level)
+        frac    = self._highway_alpha / 255
+        fill_w  = max(8, int(track_w * frac))
+        fill_r  = pygame.Rect(track_x, track_y - 4, fill_w, 8)
+        col_hwy = T.GOLD if frac < 1.0 else T.TEXT_3
+        pygame.draw.rect(surf, col_hwy, fill_r, border_radius=4)
+        # Handle knob
+        hx = track_x + int(track_w * frac)
+        pygame.draw.circle(surf, T.TEXT_1, (hx, track_y), 7)
+        pygame.draw.circle(surf, col_hwy, (hx, track_y), 5)
+        # Percentage label
+        pct_lbl = f"{int(frac * 100)}%"
+        C.text(surf, pct_lbl, "cond_bold", 11, col_hwy,
+               track_r.right + 6, track_y, anchor="midleft")
+
+        # ── LYRICS toggle ─────────────────────────────────────────────────────
         lyr_on = self._lyrics_visible
-        lyr_r  = pygame.Rect(bx, by + BTN_H + GAP, BTN_W, BTN_H)
+        lyr_w  = 110
+        lyr_r  = pygame.Rect(T.SCREEN_W - lyr_w - 10, by, lyr_w, BTN_H)
         self._lyr_btn = lyr_r
-        pygame.draw.rect(surf, T.BG_CARD, lyr_r, border_radius=8)
-        pygame.draw.rect(surf, T.SUCCESS if lyr_on else T.RED,
-                         lyr_r, 1, border_radius=8)
-        C.text(surf, "LYRICS: " + ("ON" if lyr_on else "OFF"), "cond_bold", 13,
+        pygame.draw.rect(surf, T.BG_CARD, lyr_r, border_radius=7)
+        pygame.draw.rect(surf, T.SUCCESS if lyr_on else T.RED, lyr_r, 1, border_radius=7)
+        C.text(surf, "LYRICS " + ("ON" if lyr_on else "OFF"), "cond_bold", 12,
                T.SUCCESS if lyr_on else T.RED,
                lyr_r.centerx, lyr_r.centery, anchor="center", uppercase=True)
 
@@ -820,12 +856,12 @@ class GameplayScreen(BaseScreen):
                T.SCREEN_W // 2, ty + bh // 2, anchor="center", alpha=a)
 
     def _draw_hint(self, surf):
-        parts = ["P Pause", "ESC Quit"]
+        # Keyboard shortcut hints sit just below the bottom control strip
+        parts = ["ESC Quit"]
         if self.audio.stems_loaded:
-            parts += ["[ / ] Vocal vol", "M Mute"]
-        # Keep hint text away from the display-option buttons on the right
-        C.text(surf, "  ·  ".join(parts), "body_reg", 12, T.TEXT_3,
-               280, T.SCREEN_H - 16, anchor="midbottom")
+            parts += ["[ / ] Vocal", "M Mute"]
+        C.text(surf, "  ·  ".join(parts), "body_reg", 11, T.TEXT_3,
+               T.SCREEN_W // 2, T.HIGHWAY_BOT + 52, anchor="midtop")
 
     # ── Overlays ──────────────────────────────────────────────────────────
 

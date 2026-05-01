@@ -90,9 +90,14 @@ class SongSelectScreen(BaseScreen):
         # Per-song background-op status: "idle" | "fetching" | "done" | "error"
         self._lyrics_dl: dict[str, str] = {}   # keyed by song.folder
         self._cover_dl:  dict[str, str] = {}
+        self._audio_dl:  dict[str, str] = {}
         self._lyrics_btn: pygame.Rect = pygame.Rect(0, 0, 1, 1)
         self._cover_btn:  pygame.Rect = pygame.Rect(0, 0, 1, 1)
         self._rename_btn: pygame.Rect = pygame.Rect(0, 0, 1, 1)
+        self._audio_dl_btn: pygame.Rect = pygame.Rect(0, 0, 1, 1)
+        self._audio_q_rect: pygame.Rect = pygame.Rect(0, 0, 1, 1)
+        self._audio_q: str = ""              # editable audio search query
+        self._audio_q_focused: bool = False  # is audio search field focused
 
         # ── Cover search-query editing (shown inline when cover btn clicked) ──
         self._cover_search        : bool  = False   # True = input bar visible
@@ -135,6 +140,7 @@ class SongSelectScreen(BaseScreen):
             self._cards = list(self._all_cards)
         self._sort()
         self._sel = min(self._sel, max(0, len(self._cards) - 1))
+        self._audio_q = ""   # will be re-filled on next draw
 
     def _sort(self):
         mode = SORT_MODES[self._sort_idx]
@@ -205,6 +211,24 @@ class SongSelectScreen(BaseScreen):
                 # Fall through so clicks on other UI elements still work
             # Don't return — allow scroll wheel etc. to pass through
 
+        # ── Audio search query input ──────────────────────────────────────────
+        if self._audio_q_focused:
+            if event.type == pygame.KEYDOWN:
+                k = event.key
+                if k in (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_TAB):
+                    self._audio_q_focused = False
+                    if k == pygame.K_RETURN:
+                        self._download_audio()
+                elif k == pygame.K_BACKSPACE:
+                    self._audio_q = self._audio_q[:-1]
+                elif event.unicode and event.unicode.isprintable():
+                    self._audio_q += event.unicode
+                return   # consume keypresses while focused
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if not self._audio_q_rect.collidepoint(event.pos):
+                    self._audio_q_focused = False
+                # Fall through for click handling
+
         if event.type == pygame.KEYDOWN:
             k = event.key
             if self._search_active:
@@ -225,9 +249,13 @@ class SongSelectScreen(BaseScreen):
             if k in (pygame.K_UP, pygame.K_w):
                 self._sel = max(0, self._sel - 1)
                 self._cover_search = False
+                self._audio_q_focused = False
+                self._prefill_audio_q()
             elif k in (pygame.K_DOWN, pygame.K_s):
                 self._sel = min(len(self._cards) - 1, self._sel + 1)
                 self._cover_search = False
+                self._audio_q_focused = False
+                self._prefill_audio_q()
             elif k in (pygame.K_RETURN, pygame.K_SPACE):
                 self._play()
             elif k == pygame.K_ESCAPE:
@@ -286,6 +314,8 @@ class SongSelectScreen(BaseScreen):
                 else:
                     self._sel = i
                     self._cover_search = False
+                    self._audio_q_focused = False
+                    self._prefill_audio_q()
                 return
 
         if self._lyrics_btn.collidepoint(pos):
@@ -311,6 +341,14 @@ class SongSelectScreen(BaseScreen):
                 self._rename_artist = song.artist
                 self._rename_field  = 0
                 self._rename_mode   = True
+            return
+
+        if self._audio_q_rect.collidepoint(pos):
+            self._audio_q_focused = True
+            return
+
+        if self._audio_dl_btn.collidepoint(pos):
+            self._download_audio()
             return
 
         if hasattr(self, "_play_btn") and self._play_btn.collidepoint(pos):
@@ -392,6 +430,90 @@ class SongSelectScreen(BaseScreen):
         except Exception as e:
             print(f"[FetchLyrics] {e}")
             self._lyrics_dl[key] = "error"
+
+    def _prefill_audio_q(self):
+        """Set the audio search query to the selected song's artist + title."""
+        if self._cards and self._sel < len(self._cards):
+            song = self._cards[self._sel].song
+            self._audio_q = f"{song.artist} {song.title}"
+
+    def _download_audio(self):
+        """Start background yt-dlp audio download for the selected song."""
+        if not self._cards or self._sel >= len(self._cards):
+            return
+        song = self._cards[self._sel].song
+        key  = song.folder or song.title
+        if self._audio_dl.get(key) == "fetching":
+            return
+        q = self._audio_q.strip() or f"{song.artist} {song.title}"
+        self._audio_dl[key] = "fetching"
+        self._audio_q_focused = False
+        threading.Thread(target=self._download_audio_bg,
+                         args=(song, q), daemon=True).start()
+
+    def _download_audio_bg(self, song, query: str):
+        """Background: download audio from YouTube using yt-dlp."""
+        key = song.folder or song.title
+        try:
+            import yt_dlp as _yt
+            if not song.folder:
+                self._audio_dl[key] = "error"
+                return
+
+            # Try to find ffmpeg
+            try:
+                from engine.youtube_client import _FFMPEG_DIR
+            except ImportError:
+                _FFMPEG_DIR = None
+
+            ydl_opts = {
+                "quiet": True, "no_warnings": True,
+                "format": "bestaudio/best",
+                "outtmpl": os.path.join(song.folder, "%(title)s.%(ext)s"),
+                "postprocessors": [{
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": "192",
+                }],
+            }
+            if _FFMPEG_DIR:
+                ydl_opts["ffmpeg_location"] = _FFMPEG_DIR
+
+            search_q = f"ytsearch1:{query}"
+            with _yt.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(search_q, download=True)
+                entries = (info or {}).get("entries", [info]) if info else []
+                if entries and entries[0]:
+                    # Update song.mp3 to point to the downloaded file
+                    entry = entries[0]
+                    title = entry.get("title", "audio")
+                    mp3_name = f"{title}.mp3"
+                    mp3_path = os.path.join(song.folder, mp3_name)
+                    if os.path.exists(mp3_path):
+                        song.mp3 = mp3_name
+                        # Patch #MP3: tag in .txt
+                        for txt_path in glob.glob(os.path.join(song.folder, "*.txt")):
+                            try:
+                                with open(txt_path, "r", encoding="utf-8", errors="replace") as f:
+                                    lines = f.readlines()
+                                out = [l for l in lines
+                                       if not l.upper().lstrip().startswith("#MP3:")]
+                                # Insert after #ARTIST line
+                                for i, l in enumerate(out):
+                                    if l.upper().lstrip().startswith("#ARTIST:"):
+                                        out.insert(i + 1, f"#MP3:{mp3_name}\n")
+                                        break
+                                else:
+                                    out.insert(0, f"#MP3:{mp3_name}\n")
+                                with open(txt_path, "w", encoding="utf-8") as f:
+                                    f.writelines(out)
+                            except Exception:
+                                pass
+
+            self._audio_dl[key] = "done"
+        except Exception as e:
+            print(f"[AudioDL] {e}")
+            self._audio_dl[key] = "error"
 
     def _start_cover_fetch(self):
         """Confirm the cover search query and start background download."""
@@ -708,172 +830,189 @@ class SongSelectScreen(BaseScreen):
         key  = song.folder or song.title
         y    = top + 8
 
+        # Pre-fill audio query on first view of this song
+        if not self._audio_q:
+            self._audio_q = f"{song.artist} {song.title}"
+
         # Kick off cover download in the background if missing
         card.fetch_cover_async()
 
-        # Album art / placeholder — displayed at half the panel width
-        art_size = dw // 2
-        cover_size = (art_size, art_size)
-        cover = card.cover(cover_size)
-        art_x = dx + (dw - art_size) // 2   # centered in detail panel
+        # ── TOP SECTION: cover art (left) + title/meta (right) ───────────────
+        ART = 148   # cover art square size
+        cover = card.cover((ART, ART))
         if cover:
-            surf.blit(cover, (art_x, y))
-            y += art_size + 10
+            surf.blit(cover, (dx, y))
         else:
-            ph = pygame.Rect(art_x, y, art_size, art_size)
-            C.panel(surf, ph, color=T.BG_CARD, border=T.HIGHWAY_GRID,
-                    radius=12, alpha=200)
-            C.lightning(surf, ph.centerx - 28, y + 16, 56, art_size - 32, T.GOLD, alpha=40)
+            ph = pygame.Rect(dx, y, ART, ART)
+            C.panel(surf, ph, color=T.BG_CARD, border=T.HIGHWAY_GRID, radius=10, alpha=200)
             if card._cover_fetching:
                 dots = "." * (int(self._t * 3) % 4)
-                C.text(surf, f"Fetching{dots}", "body_reg", 16, T.TEXT_3,
+                C.text(surf, f"…{dots}", "body_reg", 13, T.TEXT_3,
                        ph.centerx, ph.centery, anchor="center")
             else:
-                C.text(surf, "?", "display_black", 52, T.TEXT_3,
+                C.text(surf, "?", "display_black", 40, T.TEXT_3,
                        ph.centerx, ph.centery, anchor="center")
-            y += art_size + 10
 
-        # ── Action buttons row: FETCH LYRICS | DOWNLOAD COVER ────────────────
-        btn_h   = 34
-        gap     = 8
-        btn_w   = (dw - gap) // 2
+        # Right column: title / artist / compact metadata
+        rx = dx + ART + 12
+        rw = dw - ART - 12
+        ry = y
 
-        # --- FETCH LYRICS button ---
-        lyr_status  = self._lyrics_dl.get(key, "idle")
-        lbx = dx
-        lby = y
-        lyr_btn = pygame.Rect(lbx, lby, btn_w, btn_h)
-        self._lyrics_btn = lyr_btn
+        C.text_shadow(surf, song.title[:28], "display_bold", 20, T.TEXT_1,
+                      rx, ry, anchor="topleft", shadow_color=(0,0,0), offset=(1,2))
+        ry += 26
+        C.text(surf, song.artist[:30], "body_semi", 14, T.TEXT_2, rx, ry, anchor="topleft")
+        ry += 22
+        C.h_divider(surf, rx, rx + rw, ry + 2, alpha=60)
+        ry += 10
 
-        if lyr_status == "fetching":
-            dots = "." * (int(self._t * 3) % 4)
-            lbl_lyr  = f"Fetching{dots}"
-            bg_lyr   = T.BG_CARD
-            brd_lyr  = T.GOLD
-            txt_lyr  = T.TEXT_3
-        elif lyr_status == "done":
-            lbl_lyr  = "✓ Lyrics OK"
-            bg_lyr   = (30, 60, 40)
-            brd_lyr  = T.SUCCESS
-            txt_lyr  = T.SUCCESS
-        elif lyr_status == "error":
-            lbl_lyr  = "✗ Lyrics Failed"
-            bg_lyr   = (60, 25, 25)
-            brd_lyr  = T.RED
-            txt_lyr  = T.RED
-        else:
-            lbl_lyr  = "♪ Fetch Lyrics"
-            bg_lyr   = T.BG_CARD
-            brd_lyr  = T.HIGHWAY_GRID
-            txt_lyr  = T.TEXT_2
+        def mini_meta(label, val, col=T.TEXT_2):
+            nonlocal ry
+            C.text(surf, label, "cond_bold", 11, T.TEXT_3, rx, ry, uppercase=True)
+            C.text(surf, val,   "body_semi", 13, col,       rx + 90, ry)
+            ry += 19
 
-        pygame.draw.rect(surf, bg_lyr,  lyr_btn, border_radius=8)
-        pygame.draw.rect(surf, brd_lyr, lyr_btn, 1, border_radius=8)
-        C.text(surf, lbl_lyr, "body_semi", 13, txt_lyr,
-               lyr_btn.centerx, lyr_btn.centery, anchor="center")
+        mini_meta("Language", song.language or "—")
+        mini_meta("Genre",    song.genre    or "—")
+        mini_meta("Year",     song.year     or "—")
+        mini_meta("BPM",      f"{song.bpm:.0f}")
+        mini_meta("Audio",
+                  "Found" if song.mp3_path else "Missing",
+                  T.SUCCESS if song.mp3_path else T.RED)
 
-        # --- DOWNLOAD COVER button ---
-        cov_status = self._cover_dl.get(key, "idle")
-        cbx = dx + btn_w + gap
-        cby = y
-        cov_btn = pygame.Rect(cbx, cby, btn_w, btn_h)
-        self._cover_btn = cov_btn
+        y += ART + 12   # move below the art block
 
-        if cov_status == "fetching" or card._cover_fetching:
-            dots = "." * (int(self._t * 3) % 4)
-            lbl_cov  = f"Fetching{dots}"
-            bg_cov   = T.BG_CARD
-            brd_cov  = T.GOLD
-            txt_cov  = T.TEXT_3
-        elif cov_status == "done":
-            lbl_cov  = "✓ Cover OK"
-            bg_cov   = (30, 60, 40)
-            brd_cov  = T.SUCCESS
-            txt_cov  = T.SUCCESS
-        elif cov_status == "error":
-            lbl_cov  = "✗ Cover Failed"
-            bg_cov   = (60, 25, 25)
-            brd_cov  = T.RED
-            txt_cov  = T.RED
-        else:
-            lbl_cov  = "⬇ Cover"
-            bg_cov   = T.BG_CARD
-            brd_cov  = T.HIGHWAY_GRID
-            txt_cov  = T.TEXT_2
+        # ── Three-button action row: LYRICS | COVER | RENAME ─────────────────
+        b3_h = 28
+        b3_w = (dw - 8) // 3
 
-        pygame.draw.rect(surf, bg_cov,  cov_btn, border_radius=8)
-        pygame.draw.rect(surf, brd_cov, cov_btn, 1, border_radius=8)
-        C.text(surf, lbl_cov, "body_semi", 13, txt_cov,
-               cov_btn.centerx, cov_btn.centery, anchor="center")
+        def status_btn(rect, status, idle_lbl, fetching=False):
+            """Draw a 3-state status button and return it."""
+            if fetching or status == "fetching":
+                dots = "." * (int(self._t * 3) % 4)
+                lbl, bg, brd, tc = f"…{dots}", T.BG_CARD, T.GOLD, T.TEXT_3
+            elif status == "done":
+                lbl, bg, brd, tc = "✓ OK", (28,55,36), T.SUCCESS, T.SUCCESS
+            elif status == "error":
+                lbl, bg, brd, tc = "✗ Error", (55,22,22), T.RED, T.RED
+            else:
+                lbl, bg, brd, tc = idle_lbl, T.BG_CARD, T.HIGHWAY_GRID, T.TEXT_2
+            pygame.draw.rect(surf, bg,  rect, border_radius=7)
+            pygame.draw.rect(surf, brd, rect, 1, border_radius=7)
+            C.text(surf, lbl, "cond_bold", 12, tc,
+                   rect.centerx, rect.centery, anchor="center")
 
-        y += btn_h + 6
+        lyr_r = pygame.Rect(dx,                 y, b3_w, b3_h)
+        cov_r = pygame.Rect(dx + b3_w + 4,      y, b3_w, b3_h)
+        ren_r = pygame.Rect(dx + (b3_w + 4) * 2, y, b3_w, b3_h)
+        self._lyrics_btn = lyr_r
+        self._cover_btn  = cov_r
+        self._rename_btn = ren_r
 
-        # ── Cover search input (shown when user clicked ⬇ Cover) ─────────────
+        status_btn(lyr_r, self._lyrics_dl.get(key, "idle"), "♪ Lyrics")
+        status_btn(cov_r, self._cover_dl.get(key, "idle"),  "⬇ Cover",
+                   fetching=card._cover_fetching)
+        pygame.draw.rect(surf, T.BG_CARD, ren_r, border_radius=7)
+        pygame.draw.rect(surf, T.HIGHWAY_GRID, ren_r, 1, border_radius=7)
+        C.text(surf, "✏ Rename", "cond_bold", 12, T.TEXT_3,
+               ren_r.centerx, ren_r.centery, anchor="center")
+
+        y += b3_h + 6
+
+        # Cover search input row (shown when ⬇ Cover clicked)
         if self._cover_search:
-            inp_h = 30
-            inp_r = pygame.Rect(dx, y, dw - 70, inp_h)
+            inp_h = 28
+            inp_r = pygame.Rect(dx, y, dw - 66, inp_h)
             pygame.draw.rect(surf, T.BG_CARD, inp_r, border_radius=6)
             pygame.draw.rect(surf, T.GOLD, inp_r, 1, border_radius=6)
-            q_display = self._cover_search_q or ""
             blink = "|" if int(self._cursor_t * 2) % 2 == 0 else ""
-            C.text(surf, q_display + blink, "body_reg", 13, T.TEXT_1,
-                   inp_r.x + 8, inp_r.centery, anchor="midleft")
-
-            # GO button
-            go_r = pygame.Rect(inp_r.right + 4, y, 30, inp_h)
+            C.text(surf, self._cover_search_q + blink, "body_reg", 12, T.TEXT_1,
+                   inp_r.x + 7, inp_r.centery, anchor="midleft")
+            go_r = pygame.Rect(inp_r.right + 4, y, 28, inp_h)
             self._cover_confirm_btn = go_r
             pygame.draw.rect(surf, T.GOLD, go_r, border_radius=6)
-            C.text(surf, "GO", "cond_bold", 11, T.TEXT_INV,
+            C.text(surf, "GO", "cond_bold", 10, T.TEXT_INV,
                    go_r.centerx, go_r.centery, anchor="center")
-
-            # ✕ cancel
-            cx_r = pygame.Rect(go_r.right + 4, y, 28, inp_h)
+            cx_r = pygame.Rect(go_r.right + 4, y, 26, inp_h)
             self._cover_cancel_btn = cx_r
             pygame.draw.rect(surf, T.BG_CARD, cx_r, border_radius=6)
             pygame.draw.rect(surf, T.TEXT_3, cx_r, 1, border_radius=6)
-            C.text(surf, "✕", "body_reg", 13, T.TEXT_3,
+            C.text(surf, "✕", "body_reg", 12, T.TEXT_3,
                    cx_r.centerx, cx_r.centery, anchor="center")
-
             y += inp_h + 6
+
+        # ── LYRICS PREVIEW section ────────────────────────────────────────────
+        C.h_divider(surf, dx, dx + dw, y + 2, alpha=70)
+        y += 10
+        C.text(surf, "LYRICS PREVIEW", "cond_bold", 11, T.TEXT_3,
+               dx, y, anchor="topleft", uppercase=True)
+        y += 16
+
+        all_lines = list(song.lines()) if song.notes else []
+        if all_lines:
+            preview = []
+            for ln in all_lines:
+                txt = "".join(n.text for n in ln).strip()
+                if txt:
+                    preview.append(txt)
+                if len(preview) >= 5:
+                    break
+            for txt in preview:
+                C.text(surf, txt[:58], "body_reg", 13, T.TEXT_3,
+                       dx, y, anchor="topleft")
+                y += 19
         else:
-            y += 2
+            C.text(surf, "No lyrics in this song file.", "body_reg", 13, T.TEXT_3,
+                   dx, y, anchor="topleft")
+            y += 20
 
-        # ── RENAME button (full width, subtle) ───────────────────────────────
-        ren_h = 28
-        ren_r = pygame.Rect(dx, y, dw, ren_h)
-        self._rename_btn = ren_r
-        pygame.draw.rect(surf, T.BG_CARD, ren_r, border_radius=6)
-        pygame.draw.rect(surf, T.HIGHWAY_GRID, ren_r, 1, border_radius=6)
-        C.text(surf, "✏  RENAME SONG", "cond_bold", 12, T.TEXT_3,
-               ren_r.centerx, ren_r.centery, anchor="center", uppercase=True)
-        y += ren_h + 12
+        # ── DOWNLOAD AUDIO section ────────────────────────────────────────────
+        C.h_divider(surf, dx, dx + dw, y + 4, alpha=70)
+        y += 12
+        C.text(surf, "DOWNLOAD AUDIO", "cond_bold", 11, T.TEXT_3,
+               dx, y, anchor="topleft", uppercase=True)
+        y += 16
 
-        # ── Song title / metadata ─────────────────────────────────────────────
-        C.text_shadow(surf, song.title, "display_bold", 24, T.TEXT_1,
-                      dx, y, anchor="topleft",
-                      shadow_color=(0,0,0), offset=(1,2))
-        y += 32
-        C.text(surf, song.artist, "body_semi", 16, T.TEXT_2, dx, y)
-        y += 28
+        dl_status = self._audio_dl.get(key, "idle")
+        aud_inp_w  = dw - 78
+        aud_inp_r  = pygame.Rect(dx, y, aud_inp_w, 30)
+        self._audio_q_rect = aud_inp_r
+        focused = self._audio_q_focused
+        border  = T.GOLD if focused else T.HIGHWAY_GRID
+        pygame.draw.rect(surf, T.BG_CARD, aud_inp_r, border_radius=6)
+        pygame.draw.rect(surf, border, aud_inp_r, 1, border_radius=6)
+        blink = "|" if focused and int(self._cursor_t * 2) % 2 == 0 else ""
+        q_text = self._audio_q or f"{song.artist} {song.title}"
+        C.text(surf, q_text + blink, "body_reg", 13, T.TEXT_1 if focused else T.TEXT_2,
+               aud_inp_r.x + 8, aud_inp_r.centery, anchor="midleft")
 
-        C.h_divider(surf, dx, dx + dw, y + 4, alpha=80)
-        y += 18
+        # Download button
+        dl_btn_r = pygame.Rect(aud_inp_r.right + 6, y, 70, 30)
+        self._audio_dl_btn = dl_btn_r
+        if dl_status == "fetching":
+            dots = "." * (int(self._t * 3) % 4)
+            pygame.draw.rect(surf, T.BG_CARD, dl_btn_r, border_radius=6)
+            pygame.draw.rect(surf, T.GOLD, dl_btn_r, 1, border_radius=6)
+            C.text(surf, f"…{dots}", "cond_bold", 12, T.GOLD,
+                   dl_btn_r.centerx, dl_btn_r.centery, anchor="center")
+        elif dl_status == "done":
+            pygame.draw.rect(surf, (28, 55, 36), dl_btn_r, border_radius=6)
+            pygame.draw.rect(surf, T.SUCCESS, dl_btn_r, 1, border_radius=6)
+            C.text(surf, "✓ DONE", "cond_bold", 11, T.SUCCESS,
+                   dl_btn_r.centerx, dl_btn_r.centery, anchor="center")
+        elif dl_status == "error":
+            pygame.draw.rect(surf, (55, 22, 22), dl_btn_r, border_radius=6)
+            pygame.draw.rect(surf, T.RED, dl_btn_r, 1, border_radius=6)
+            C.text(surf, "RETRY", "cond_bold", 12, T.RED,
+                   dl_btn_r.centerx, dl_btn_r.centery, anchor="center")
+        else:
+            C.pill(surf, dl_btn_r, T.GOLD, alpha=210)
+            C.text(surf, "⬇ DL", "cond_bold", 13, T.TEXT_INV,
+                   dl_btn_r.centerx, dl_btn_r.centery, anchor="center")
 
-        def meta_row(label, val, val_col=T.TEXT_2):
-            nonlocal y
-            C.text(surf, label, "cond_bold", 12, T.TEXT_3,  dx, y, uppercase=True)
-            C.text(surf, val,   "body_semi", 14, val_col,   dx + 110, y)
-            y += 24
+        y += 36
 
-        meta_row("Language", song.language or "—")
-        meta_row("Genre",    song.genre    or "—")
-        meta_row("Year",     song.year     or "—")
-        meta_row("BPM",      f"{song.bpm:.1f}")
-        meta_row("Audio",
-                 "Found"    if song.mp3_path else "Missing",
-                 T.SUCCESS  if song.mp3_path else T.RED)
-
-        # Play button
+        # ── Play button ───────────────────────────────────────────────────────
         shim = C.pulse(self._t, 1.4)
         btn  = pygame.Rect(dx, T.SCREEN_H - 64, dw, 48)
         self._play_btn = btn

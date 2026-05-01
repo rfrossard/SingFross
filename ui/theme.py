@@ -47,7 +47,7 @@ HIGHWAY_BOT   = 510
 HIGHWAY_LEFT  = 40
 HIGHWAY_RIGHT = 1240
 LYRICS_Y      = 528
-CURRENT_X     = int(HIGHWAY_LEFT + (HIGHWAY_RIGHT - HIGHWAY_LEFT) * 0.25)
+CURRENT_X     = 220   # time-marker x — aligned with the ×1 multiplier badge
 LOOK_AHEAD    = 6.0
 LOOK_BACK     = 1.5
 
