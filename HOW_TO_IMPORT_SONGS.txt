@@ -1,0 +1,55 @@
+===========================================================
+  SINGFROSS – How to Import Songs
+===========================================================
+
+SONG FORMAT
+-----------
+SingFross uses the UltraStar .txt format, compatible with:
+  • Vocaluxe (https://www.vocaluxe.org/)
+  • UltraStar Deluxe (USDX)
+  • UltraStar Worldparty
+  • Performous
+  • KaraFun (export to UltraStar)
+
+Each song needs a folder containing:
+  MyFolder/
+    song.txt      ← UltraStar note file (required)
+    audio.mp3     ← Music file (optional – game works without it)
+    cover.jpg     ← Album art (optional)
+
+WHERE TO FIND SONGS
+-------------------
+1. usdb.animux.de – largest UltraStar song database (free, requires account)
+2. ultrastar-es.org
+3. GitHub: search "ultrastar songs pack"
+
+HOW TO IMPORT
+-------------
+Method 1 – In-game (recommended):
+  Song Select screen → press I → choose the song folder in Finder
+  SingFross copies the folder into songs/ automatically.
+
+Method 2 – Manual:
+  Drop any UltraStar song folder into:
+    /Users/frossard/Dev/SingFross/songs/
+  Press R on the Song Select screen to refresh.
+
+SUPPORTED AUDIO FORMATS
+------------------------
+  MP3, OGG, WAV, FLAC (via pygame.mixer)
+
+NOTE FILE SYNTAX (quick reference)
+------------------------------------
+  #TITLE:My Song
+  #ARTIST:Artist Name
+  #MP3:audio.mp3
+  #BPM:120.00
+  #GAP:2000        ← milliseconds of silence before beat 0
+
+  : beat dur pitch syllable   ← normal note
+  * beat dur pitch syllable   ← golden note (2× points)
+  F beat dur pitch syllable   ← freestyle (no pitch scoring)
+  - beat                      ← line break
+  E                           ← end of song
+
+===========================================================

@@ -1,0 +1,51 @@
+# Credentials — never commit these
+.env
+*.env
+*.key
+
+# Songs library — personal music files, not part of the source code
+songs/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.py[cod]
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# macOS
+.DS_Store
+*.DS_Store
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Demucs / audio separation output
+tmp_stems/
+separated/
+
+# Compiled / packaged app
+dist/
+build/
+*.app
+
+# Audio files (belong in songs/, not the repo root)
+*.mp3
+*.ogg
+*.m4a
+*.wav
+*.flac
+
+# Config overrides with credentials
+config.json

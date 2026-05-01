@@ -1,0 +1,173 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 480" width="800" height="480">
+  <defs>
+    <!-- Radial glow behind icon -->
+    <radialGradient id="iconGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#ffc41c" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#ffc41c" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Gold gradient for text -->
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#ffe680"/>
+      <stop offset="45%"  stop-color="#ffc41c"/>
+      <stop offset="100%" stop-color="#cc8800"/>
+    </linearGradient>
+
+    <!-- White gradient for SING -->
+    <linearGradient id="whiteGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#c8c8d8"/>
+    </linearGradient>
+
+    <!-- Gold glow filter -->
+    <filter id="goldGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Soft glow for tagline divider -->
+    <filter id="softGlow" x="-20%" y="-100%" width="140%" height="300%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Drop shadow for main text -->
+    <filter id="textShadow" x="-5%" y="-5%" width="115%" height="130%">
+      <feDropShadow dx="3" dy="5" stdDeviation="4" flood-color="#000000" flood-opacity="0.7"/>
+    </filter>
+
+    <!-- Icon drop shadow -->
+    <filter id="iconShadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="2" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.8"/>
+    </filter>
+  </defs>
+
+  <!-- ══ BACKGROUND ══ -->
+  <rect width="800" height="480" fill="#0a0a0e"/>
+
+  <!-- Subtle vignette -->
+  <radialGradient id="vignette" cx="50%" cy="45%" r="70%">
+    <stop offset="0%"   stop-color="#1a1a26" stop-opacity="1"/>
+    <stop offset="100%" stop-color="#020204" stop-opacity="1"/>
+  </radialGradient>
+  <rect width="800" height="480" fill="url(#vignette)"/>
+
+  <!-- Background scan lines (subtle) -->
+  <pattern id="scanlines" x="0" y="0" width="1" height="4" patternUnits="userSpaceOnUse">
+    <rect width="1" height="1" y="0" fill="#ffffff" opacity="0.012"/>
+  </pattern>
+  <rect width="800" height="480" fill="url(#scanlines)"/>
+
+  <!-- ══ BACKGROUND GLOW BEHIND ICON ══ -->
+  <ellipse cx="400" cy="158" rx="140" ry="120" fill="url(#iconGlow)"/>
+
+  <!-- ══ MICROPHONE + LIGHTNING ICON ══ -->
+  <g filter="url(#iconShadow)">
+
+    <!-- Mic capsule outer ring (subtle) -->
+    <ellipse cx="400" cy="138" rx="52" ry="66" fill="none"
+             stroke="#ffc41c" stroke-width="1.5" stroke-opacity="0.25"/>
+
+    <!-- Mic body / capsule -->
+    <rect x="358" y="72" width="84" height="132" rx="42"
+          fill="#14141e" stroke="#ffc41c" stroke-width="3"/>
+
+    <!-- Mic grille slots -->
+    <line x1="362" y1="108" x2="438" y2="108" stroke="#ffc41c" stroke-width="1.5" stroke-opacity="0.4" stroke-linecap="round"/>
+    <line x1="360" y1="124" x2="440" y2="124" stroke="#ffc41c" stroke-width="1.5" stroke-opacity="0.4" stroke-linecap="round"/>
+    <line x1="362" y1="140" x2="438" y2="140" stroke="#ffc41c" stroke-width="1.5" stroke-opacity="0.4" stroke-linecap="round"/>
+    <line x1="367" y1="156" x2="433" y2="156" stroke="#ffc41c" stroke-width="1.5" stroke-opacity="0.4" stroke-linecap="round"/>
+    <line x1="376" y1="170" x2="424" y2="170" stroke="#ffc41c" stroke-width="1.5" stroke-opacity="0.3" stroke-linecap="round"/>
+
+    <!-- Lightning bolt through center of mic — the signature element -->
+    <polygon points="418,80 392,124 410,124 382,196 420,124 400,124"
+             fill="url(#goldGrad)" filter="url(#goldGlow)"/>
+
+    <!-- Mic stand arc -->
+    <path d="M340,204 Q400,236 460,204"
+          fill="none" stroke="#ffc41c" stroke-width="4" stroke-linecap="round"/>
+
+    <!-- Mic stand pole -->
+    <line x1="400" y1="228" x2="400" y2="260"
+          stroke="#ffc41c" stroke-width="4" stroke-linecap="round"/>
+
+    <!-- Mic stand base -->
+    <line x1="360" y1="260" x2="440" y2="260"
+          stroke="#ffc41c" stroke-width="4" stroke-linecap="round"/>
+    <ellipse cx="400" cy="260" rx="40" ry="5"
+             fill="none" stroke="#ffc41c" stroke-width="3" stroke-opacity="0.5"/>
+  </g>
+
+  <!-- ══ SOUND WAVES (left & right of mic) ══ -->
+  <!-- Left waves -->
+  <g opacity="0.55">
+    <path d="M322,100 Q306,138 322,176" fill="none" stroke="#ffc41c" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M302,86  Q276,138 302,190" fill="none" stroke="#ffc41c" stroke-width="2"   stroke-linecap="round" opacity="0.6"/>
+    <path d="M284,72  Q248,138 284,204" fill="none" stroke="#ffc41c" stroke-width="1.5" stroke-linecap="round" opacity="0.3"/>
+  </g>
+  <!-- Right waves -->
+  <g opacity="0.55">
+    <path d="M478,100 Q494,138 478,176" fill="none" stroke="#ffc41c" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M498,86  Q524,138 498,190" fill="none" stroke="#ffc41c" stroke-width="2"   stroke-linecap="round" opacity="0.6"/>
+    <path d="M516,72  Q552,138 516,204" fill="none" stroke="#ffc41c" stroke-width="1.5" stroke-linecap="round" opacity="0.3"/>
+  </g>
+
+  <!-- ══ MAIN LOGOTYPE ══ -->
+  <!-- "SING" white + "FROSS" gold — side by side, huge -->
+  <g filter="url(#textShadow)">
+    <!-- SING -->
+    <text x="168" y="348"
+          font-family="'Arial Black', 'Impact', 'Haettenschweiler', sans-serif"
+          font-size="148" font-weight="900"
+          letter-spacing="-4"
+          fill="url(#whiteGrad)">SING</text>
+    <!-- FROSS -->
+    <text x="424" y="348"
+          font-family="'Arial Black', 'Impact', 'Haettenschweiler', sans-serif"
+          font-size="148" font-weight="900"
+          letter-spacing="-4"
+          fill="url(#goldGrad)">FROSS</text>
+  </g>
+
+  <!-- Gold accent line between tagline and title -->
+  <rect x="60" y="360" width="680" height="2" rx="1"
+        fill="url(#goldGrad)" opacity="0.55" filter="url(#softGlow)"/>
+
+  <!-- ══ TAGLINE ══ -->
+  <text x="400" y="400"
+        font-family="'Arial', 'Helvetica Neue', sans-serif"
+        font-size="18" font-weight="700"
+        letter-spacing="8"
+        text-anchor="middle"
+        fill="#ffc41c" opacity="0.8">GARAGE BAND KARAOKE</text>
+
+  <!-- ══ DECORATIVE CORNER BOLTS ══ -->
+  <!-- Top-left -->
+  <polygon points="42,22 28,44 38,44 22,72 52,44 38,44" fill="#ffc41c" opacity="0.22"/>
+  <!-- Top-right -->
+  <polygon points="758,22 744,44 754,44 738,72 768,44 754,44" fill="#ffc41c" opacity="0.22"/>
+  <!-- Bottom-left -->
+  <polygon points="42,408 28,430 38,430 22,458 52,430 38,430" fill="#ffc41c" opacity="0.12"/>
+  <!-- Bottom-right -->
+  <polygon points="758,408 744,430 754,430 738,458 768,430 754,430" fill="#ffc41c" opacity="0.12"/>
+
+  <!-- Corner accent dots -->
+  <circle cx="54" cy="20" r="3" fill="#ffc41c" opacity="0.35"/>
+  <circle cx="746" cy="20" r="3" fill="#ffc41c" opacity="0.35"/>
+  <circle cx="54" cy="460" r="3" fill="#ffc41c" opacity="0.20"/>
+  <circle cx="746" cy="460" r="3" fill="#ffc41c" opacity="0.20"/>
+
+  <!-- ══ VERSION / STUDIO TAG ══ -->
+  <text x="400" y="450"
+        font-family="'Arial', sans-serif"
+        font-size="11" font-weight="400"
+        letter-spacing="4"
+        text-anchor="middle"
+        fill="#ffffff" opacity="0.18">SINGFROSS · FROSS GARAGE BAND</text>
+</svg>
